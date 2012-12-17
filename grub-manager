@@ -1,0 +1,481 @@
+#!/usr/bin/env python
+# Dependencies: grub2, yad, sed
+#               gtk, pygtk
+# File Name: wallpaper.py
+# Version: 1.5.0
+# Purpose: allows the user to set a grub2 background image, change the 
+#          timeout, gfx resolution, and default entry, as well as make 
+#          a custom entry in a graphical environment.
+# Authors: Dave
+
+# Copyright (C) antiXCommunity http://antix.freeforums.org
+# License: gplv2
+# This file is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+################################################################################
+#################################################################
+
+import pygtk
+pygtk.require('2.0')
+import gtk
+import re
+import os
+import glob
+import sys
+
+BACKFOLDER = os.path.expanduser("/boot/grub/splashimages/")
+for fileext in os.listdir("/boot/grub/splashimages/"):
+  if re.search(r'default', fileext):
+    pieces = fileext.split('.')
+    newline=(pieces[1])
+IMAGE=("/boot/grub/splashimages/default.%s") % ((newline))
+
+def gfxlist():
+    os.system("hwinfo --framebuffer |grep '8 bits' |cut -d ':' -f2 |cut -d ' ' -f2 > /tmp/gfxlist")
+
+def entrylist():
+    write = file(("/tmp/defaultlist"), "w")
+    write.write ("") 
+    write.close()
+    for line in open("/boot/grub/grub.cfg", "r").xreadlines():
+        if re.search(r'menuentry \'', line):
+            pieces = line.split('\'')
+            entry=(pieces[1])    
+            write = file(("/tmp/defaultlist"), "a")
+            write.write ("%s\n" % (entry)) 
+            write.close()
+        if re.search(r'menuentry "', line):
+            pieces = line.split('"')
+            entry=(pieces[1])    
+            write = file(("/tmp/defaultlist"), "a")
+            write.write ("%s\n" % (entry)) 
+            write.close()
+
+gfxlist()
+entrylist()
+
+class Error:
+    def __init__(self, error):
+       cmdstring = "yad --image=\"error\"\
+       --title=\"user-management error\"\
+       --text=\"user-management has run into an error,\
+       \nplease rerun and correct the following error!\
+       \n\n%s\n\"\
+       --button=\"gtk-ok:0\"" % (error)
+       os.system(cmdstring) 
+
+class Image:  
+    
+    def applyImage(self, widget):
+        try:
+          sedline = os.path.basename(IMAGE)
+          if re.search(r'.', sedline):
+                pieces = sedline.split('.')
+                newline=(pieces[1])
+                
+          os.system("cp %s /boot/grub/splashimages/default.%s" % ((IMAGE),(newline)))
+          cmdstring = "sed -i \"s/^GRUB_BACKGROUND=.*\\\"/GRUB_BACKGROUND=\\\"\/boot\/grub\/splashimages\/default.%s\\\"/ig\" /etc/default/grub" % ((newline))
+          os.system(cmdstring)
+        except:
+          sys.exit(Error("Error saving index of background image"))
+        
+        try:
+          os.system("update-grub")
+        except:
+          sys.exit(Error("Error while updating grub"))
+        else:
+          os.system("yad --image='info' --text='background image changed successfully' --button='gtk-ok:0'")
+
+    def update_preview(self, dialog, preview):
+        filename = dialog.get_preview_filename()
+        try:
+            pixbuf = gtk.gdk.pixbuf_new_from_file_at_size(filename, 200,200)
+            preview.set_from_pixbuf(pixbuf)
+            have_preview = True
+        except:
+            have_preview = False
+        dialog.set_preview_widget_active(have_preview)
+        return
+
+
+    def pictureselect(self, widget):
+      dialog = gtk.FileChooserDialog("Open...", None, gtk.FILE_CHOOSER_ACTION_OPEN,(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OPEN, gtk.RESPONSE_OK))
+      dialog.set_current_folder(os.path.expanduser(BACKFOLDER))
+      dialog.set_default_response(gtk.RESPONSE_OK)
+      
+      filter = gtk.FileFilter()
+      filter.set_name("Images")
+      filter.add_mime_type("image/png")
+      filter.add_mime_type("image/jpeg")
+      filter.add_mime_type("image/tga")
+      filter.add_pattern("*.png")
+      filter.add_pattern("*.jpg")
+      filter.add_pattern("*.tga")
+      filter.add_pattern("*.jpeg")
+      dialog.add_filter(filter)
+
+      previewImage = gtk.Image()
+      dialog.set_preview_widget(previewImage)
+      dialog.set_use_preview_label(False)
+      dialog.set_transient_for(GrubMain.window)
+      dialog.connect("update-preview", self.update_preview, previewImage)
+
+      response = dialog.run()
+      if response == gtk.RESPONSE_OK:
+        global IMAGE
+        IMAGE = dialog.get_filename()
+        self.imagebox.remove(self.image)
+        self.pix = gtk.gdk.pixbuf_new_from_file(dialog.get_filename())
+        self.pix = self.pix.scale_simple(300, 200, gtk.gdk.INTERP_BILINEAR)
+        self.image = gtk.image_new_from_pixbuf(self.pix)
+        self.imagebox.pack_start(self.image)
+        self.image.show()
+      elif response == gtk.RESPONSE_CANCEL:
+		print "No file selected"  
+      dialog.destroy()
+    
+    def destroy(self, widget, data=None):
+      gtk.main_quit()
+
+      
+    
+    def __init__(self):
+        self.frame = gtk.Frame()
+        self.frame.set_border_width(10)
+        self.frame.show()
+
+        vbox = gtk.VBox()
+        self.frame.add(vbox)
+        vbox.show()
+        
+        frame = gtk.Frame("Current Image")
+        vbox.pack_start(frame)
+        frame.show()
+        
+        self.pix = gtk.gdk.pixbuf_new_from_file(IMAGE)
+        self.pix = self.pix.scale_simple(300, 200, gtk.gdk.INTERP_BILINEAR)
+        self.image = gtk.image_new_from_pixbuf(self.pix)
+        self.image.show()
+        
+        self.imagebox = gtk.HBox()
+        self.imagebox.pack_start(self.image)
+        self.imagebox.show()
+        frame.add(self.imagebox)
+        
+        buttonbox = gtk.HButtonBox()
+        vbox.pack_start(buttonbox)
+        buttonbox.show()
+        
+        apply = gtk.Button(stock=gtk.STOCK_APPLY)
+        apply.connect("clicked", self.applyImage)
+        buttonbox.add(apply)
+        apply.show()
+        
+        picturebutton = gtk.Button(stock=gtk.STOCK_OPEN)
+        picturebutton.connect("clicked", self.pictureselect)
+        picturebutton.show()  
+        buttonbox.pack_start(picturebutton)
+        
+        close = gtk.Button(stock=gtk.STOCK_CLOSE)
+        close.connect("clicked", lambda w: gtk.main_quit())
+        buttonbox.add(close)
+        close.show()
+
+        self.label = gtk.Label("Image")
+
+class Basic:  
+
+    def applyBasic(self, widget):
+        model = self.gfxselect.get_model()
+        index = self.gfxselect.get_active()			
+        gfxmode = model[index][0]
+        
+        model = self.defaultselect.get_model()
+        index = self.defaultselect.get_active()			
+        defaultentry = model[index][0]
+        
+        with open("/tmp/defaultlist") as myFile:
+          for num, line in enumerate(myFile, 1):
+            if defaultentry in line:
+               cleanline=line.split('\n')
+               foundline=cleanline[0]
+               if defaultentry == foundline:
+                   print foundline
+                   default=num -1        
+        
+        timeout= int(self.hscale.get_value())
+        try:
+          cmdstring = "sed -i \"s/^.*UB_DEFAULT=.*/GRUB_DEFAULT=%s/ig\" /etc/default/grub" % ((default))
+          os.system(cmdstring)
+        except:
+          sys.exit(Error("Error setting default entry"))
+        
+        try:
+          cmdstring = "sed -i \"s/^.*_GFXMODE=.*/GRUB_GFXMODE=%s/ig\" /etc/default/grub" % ((gfxmode))
+          os.system(cmdstring)
+        except:
+          sys.exit(Error("Error setting GFX_MODE"))
+
+        try:
+          cmdstring = "sed -i \"s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=%s/ig\" /etc/default/grub" % ((timeout))
+          os.system(cmdstring)
+        except:
+          sys.exit(Error("Error setting Timeout"))
+          
+        try:
+          os.system("update-grub")
+        except:
+          sys.exit(Error("Error while updating grub"))
+        else:
+          os.system("yad --image='info' --text='Items Changed\ntimeout = %s\ngfx mode = %s\ndefault entry = %s\nchanged successful'\
+           --button='gtk-ok:0'" % ((timeout),(gfxmode),(defaultentry)))
+    
+    def find_current_default(self):
+        for line in open("/etc/default/grub", "r").xreadlines():
+            if re.search(r'GRUB_DEFAULT', line):
+                pieces = line.split('=')
+                currentdefault=float(pieces[1])
+                
+        with open("/tmp/defaultlist") as myFile:
+          for num, line in enumerate(myFile, 1):
+            if num -1 == currentdefault:
+               pieces = line.split('\n')
+               Basic.CURRENTDEFAULT=(pieces[0])
+
+    def find_current_timeout(self):
+        for line in open("/etc/default/grub", "r").xreadlines():
+            if re.search(r'GRUB_TIMEOUT', line):
+                pieces = line.split('=')
+                Basic.CURRENTTIMEOUT=float(pieces[1])
+                
+    def find_current_gfxmode(self):
+        for line in open("/etc/default/grub", "r").xreadlines():
+            if re.search(r'GRUB_GFXMODE', line):
+                pieces = line.split('=')
+                gfx=(pieces[1])
+                pieces = gfx.split('\n')
+                Basic.CURRENTGFXMODE=(pieces[0])
+    
+    def scale_set_default_values(self, scale):
+   	    scale.set_update_policy(gtk.UPDATE_CONTINUOUS)
+   	    scale.set_digits(0)
+   	    scale.set_value_pos(gtk.POS_TOP)
+   	    scale.set_draw_value(True)
+    
+    def __init__(self):
+        self.frame = gtk.Frame("Basic Configuration")
+        self.frame.set_border_width(10)
+        self.frame.show()
+
+        vbox = gtk.VBox()
+        self.frame.add(vbox)
+        vbox.show()
+        
+        frame = gtk.Frame("Timeout")
+        vbox.pack_start(frame)
+        frame.show()
+        
+        scalebox = gtk.VBox()
+        frame.add(scalebox)
+        scalebox.show()
+        
+        label= gtk.Label("Grub timeout settings")
+        scalebox.pack_start(label)
+        label.show()
+        
+        self.find_current_timeout()
+        adj1 = gtk.Adjustment(Basic.CURRENTTIMEOUT, 5.0, 61.0, 1.0, 1.0, 1.0 )
+        
+        self.hscale = gtk.HScale(adj1)
+        self.hscale.set_size_request(200, 30)
+        self.scale_set_default_values(self.hscale)
+        scalebox.pack_start(self.hscale)
+        self.hscale.show()
+        
+        frame = gtk.Frame("GFX Options")
+        vbox.pack_start(frame)
+        frame.show()
+        
+        gfxbox = gtk.VBox()
+        frame.add(gfxbox)
+        gfxbox.show()
+        
+        label= gtk.Label("Grub GFX settings")
+        gfxbox.pack_start(label)
+        label.show()
+        
+        self.find_current_gfxmode()
+        self.gfxselect = gtk.combo_box_new_text()
+        gfxbox.pack_start(self.gfxselect)
+        self.gfxselect.show()
+        self.gfxselect.append_text(Basic.CURRENTGFXMODE)    
+        for line in open("/tmp/gfxlist", "r").xreadlines():
+            if re.search(r'[0-9]x[0-9]', line):
+                pieces = line.split('\n')
+                self.gfxselect.append_text(pieces[0])
+        self.gfxselect.set_active(0)
+        
+        frame = gtk.Frame("Default Entry")
+        vbox.pack_start(frame)
+        frame.show()
+        
+        defaultbox = gtk.VBox()
+        frame.add(defaultbox)
+        defaultbox.show()
+        
+        label= gtk.Label("Default Entry settings")
+        defaultbox.pack_start(label)
+        label.show()
+        
+        self.find_current_default()
+        self.defaultselect = gtk.combo_box_new_text()
+        defaultbox.pack_start(self.defaultselect)
+        self.defaultselect.show()
+        self.defaultselect.append_text(Basic.CURRENTDEFAULT)  
+        for line in open("/tmp/defaultlist", "r").xreadlines():
+            if re.search(r'[a-z]', line):
+                pieces = line.split('\n')
+                self.defaultselect.append_text(pieces[0])
+        self.defaultselect.set_active(0)
+        
+        buttonbox = gtk.HButtonBox()
+        vbox.pack_start(buttonbox)
+        buttonbox.show()
+        
+        apply = gtk.Button(stock=gtk.STOCK_APPLY)
+        apply.connect("clicked", self.applyBasic)
+        buttonbox.add(apply)
+        apply.show()
+        
+        close = gtk.Button(stock=gtk.STOCK_CLOSE)
+        close.connect("clicked", lambda w: gtk.main_quit())
+        buttonbox.add(close)
+        close.show()
+
+        self.label = gtk.Label("Basic")
+       
+class Advanced:  
+    
+    def applyCustom(self, widget):
+        try:
+          os.system("update-grub")
+        except:
+          sys.exit(Error("Error while updating grub"))
+        else:
+          os.system("yad --image='info' --text='custom menu entry added successfully' --button='gtk-ok:0'")
+          
+    def customentry(self, widget):
+        entries=0
+        for line in open("/etc/grub.d/40_custom", "r").xreadlines():
+            if re.search(r'menuentry', line):
+                entries=(entries) +1
+            
+        if entries == 0:
+            write = file(("/etc/grub.d/40_custom"), "a")
+            write.write ("" + "\n\n")
+            write.write ("#ANTIX EXAMPLE" + "\n")
+            write.write ("" + "\n")
+            write.write ("#This is an example grub 2 entry for booting an antiX iso" + "\n") 
+            write.write ('#menuentry "antiX Full ISO" {' + '\n')
+            write.write ('#isofile="/boot/images/antiX-486.iso"' + '\n')
+            write.write ('#loopback loop $isofile' + '\n')
+            write.write ('#linux (loop)/antiX/vmlinuz fromiso=$isofile fromhd=/dev/sda2 quiet noxorg nomodeset' + '\n')
+            write.write ('#initrd (loop)/antiX/initrd.gz' + '\n')
+            write.write ('#}' + '\n')
+            write.close()
+            
+        os.system("leafpad /etc/grub.d/40_custom");
+    
+    def __init__(self):
+        self.frame = gtk.Frame("Advanced Configuration")
+        self.frame.set_border_width(10)
+        self.frame.show()
+
+        vbox = gtk.VBox()
+        self.frame.add(vbox)
+        vbox.show()
+        
+        label = gtk.Label("Add Custom Entries")
+        vbox.pack_start(label)
+        label.show()
+        
+        custom = gtk.Button(stock=gtk.STOCK_EDIT)
+        vbox.pack_start(custom)
+        custom.connect("clicked", self.customentry)
+        custom.show()
+        
+        buttonbox = gtk.HButtonBox()
+        vbox.pack_start(buttonbox)
+        buttonbox.show()
+        
+        apply = gtk.Button(stock=gtk.STOCK_APPLY)
+        apply.connect("clicked", self.applyCustom)
+        buttonbox.add(apply)
+        apply.show()
+        
+        close = gtk.Button(stock=gtk.STOCK_CLOSE)
+        close.connect("clicked", lambda w: gtk.main_quit())
+        buttonbox.add(close)
+        close.show()
+
+        self.label = gtk.Label("  Advanced  ")
+   
+
+class GrubMain:
+
+    def delete(self, widget, event=None):
+        gtk.main_quit()
+        return False
+
+    def __init__(self):
+        ROOTCHECK=os.getuid()
+        if ( ROOTCHECK != 0 ):
+            sys.exit(Error("You MUST be root to use this application!"))
+            
+        GrubMain.window = gtk.Window(gtk.WINDOW_TOPLEVEL)
+        GrubMain.window.set_title("antiX Grub 2 Manager")
+        GrubMain.window.connect("destroy", lambda w: gtk.main_quit())
+        GrubMain.window.set_border_width(10)
+
+        table = gtk.Table(2,3,False)
+        GrubMain.window.add(table)
+
+        # Create a new notebook, place the position of the tabs
+        self.notebook = gtk.Notebook()
+        self.notebook.set_tab_pos(gtk.POS_LEFT)
+        self.notebook.set_size_request(500,400)
+        table.attach(self.notebook, 0,3,0,1, xoptions=gtk.FILL, yoptions=gtk.FILL)
+        self.notebook.show()
+        
+        #Start Image Class
+        self.notebook.append_page(Image().frame, Image().label)
+        
+        #Start Basic Config Class
+        self.notebook.append_page(Basic().frame, Basic().label)
+        
+        #Start Advanced Config Class
+        self.notebook.append_page(Advanced().frame, Advanced().label)
+        
+        self.notebook.set_current_page(0)
+
+        table.show()
+        GrubMain.window.show()
+
+def main():
+    gtk.main()
+    return 0
+
+if __name__ == "__main__":
+    GrubMain()
+    main()
